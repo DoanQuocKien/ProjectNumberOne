@@ -401,6 +401,9 @@ These 20 ideas focus on **item-customer-location-category interactions** that di
 
 ### Suggested target
 
+> [!NOTE]
+> Columns `brand` and `manufacturer` contain "Không xác định" (Unknown) values. For manufacturers, this is the majority value (~80-90%). Analysis must either handle this as a separate segment or filter it out to avoid aggregate bias.
+
 - All 20 ideas should be analyzed; this is the core interaction layer for recommendations.
 - Focus is entirely on item selection, not timing or demand forecasting.
 - These ideas work best in combination with customer behavior (41–50) and item structure (31–40).
@@ -1179,6 +1182,9 @@ These ideas are meant to separate items, categories, brands, manufacturers, size
 
 ### Suggested target
 
+> [!NOTE]
+> Columns `brand` and `manufacturer` contain "Không xác định" (Unknown) values. For manufacturers, this is the majority value (~80-90%). Analysis must either handle this as a separate segment or filter it out to avoid aggregate bias.
+
 - These should be treated as the main item-level expansion after the first 30 edge ideas.
 - A good cutoff is 8 to 12 item-structure ideas, selected by signal rather than by volume.
 - If a location is clearly stocking only a subset of the catalog, that is a useful signal, not a nuisance, and should be analyzed directly.
@@ -1341,7 +1347,10 @@ Do size transitions follow a predictable ladder inside category groups, and can 
 #### Decision Rule
 - Keep if size movement is systematic (upgrade rate >40% for repeat customers within size tier) and category-consistent (>60% correlation between categories in transition patterns).
 
-### Idea 35: Price Tier by Category and Brand
+### Idea 35
+
+> [!IMPORTANT]
+> Handles "Không xác định" in brand/manufacturer columns.: Price Tier by Category and Brand
 
 #### Question
 Do some categories or brands live mostly in one price tier while others span the full range?
@@ -1352,7 +1361,7 @@ Do some categories or brands live mostly in one price tier while others span the
 
 #### Columns to Inspect
 - `price`
-- `category_l2`
+- `category_l1`
 - `category_l3`
 - `brand`
 - `item_id`
@@ -1380,7 +1389,10 @@ Do some categories or brands live mostly in one price tier while others span the
 #### Decision Rule
 - Keep if tier structure strongly separates item groups (tier entropy <1.5 for most categories, indicating tier clustering) or if brands show distinct tier specialization (>50% of items in single tier for >20% of brands).
 
-### Idea 36: Location Assortment Coverage
+### Idea 36
+
+> [!IMPORTANT]
+> Handles "Không xác định" in brand/manufacturer columns.: Location Assortment Coverage
 
 #### Question
 Do locations stock the full catalog or only narrow slices of it, and can this explain ranking differences?
@@ -1392,7 +1404,7 @@ Do locations stock the full catalog or only narrow slices of it, and can this ex
 #### Columns to Inspect
 - `location_name`
 - `item_id`
-- `category_l2`
+- `category_l1`
 - `brand`
 - `manufacturer`
 - `updated_date`
@@ -1433,7 +1445,7 @@ Do locations have stable category preferences, or are they mostly random mixes?
 
 #### Columns to Inspect
 - `location_name`
-- `category_l2`
+- `category_l1`
 - `updated_date`
 - `quantity`
 
@@ -1472,7 +1484,7 @@ Which items are frequently available in some locations but effectively absent in
 #### Columns to Inspect
 - `location_name`
 - `item_id`
-- `category_l2`
+- `category_l1`
 - `updated_date`
 - `quantity`
 
@@ -1509,13 +1521,13 @@ Do lifecycle stages differ meaningfully by category family, requiring category-s
 - `items.parquet`
 
 #### Columns to Inspect
-- `category_l2`
+- `category_l1`
 - `item_id`
 - `updated_date`
 - `quantity`
 
 #### Method
-- Classify items by lifecycle stage within each category_l2 using 3-month rolling trend slopes.
+- Classify items by lifecycle stage within each category_l1 using 3-month rolling trend slopes.
 - Compare new/growth/stable/decline proportions across categories.
 - Measure category-lifecycle specificity: variance in stage distribution across categories.
 
@@ -1586,6 +1598,9 @@ This is the layer that separates real item behavior from aggregate volume. Categ
 These ideas focus on customer-level patterns and segmentation because the recommendation output is customer→items. Understanding customer lifecycle, category affinity, repeat behavior, and purchase patterns is essential for per-customer ranking and personalization.
 
 ### Suggested target
+
+> [!NOTE]
+> Columns `brand` and `manufacturer` contain "Không xác định" (Unknown) values. For manufacturers, this is the majority value (~80-90%). Analysis must either handle this as a separate segment or filter it out to avoid aggregate bias.
 
 - These are the highest-priority ideas for a recommendation system because they directly influence ranking for each customer.
 - All 10 ideas should be analyzed; filtering is less critical here since customer behavior drives the output structure.
@@ -1659,7 +1674,7 @@ Do customers concentrate purchases in one or two categories, or do they buy broa
 - `quantity`
 
 #### Method
-- For each customer, compute category_l1 and category_l2 share distribution: (purchases in category / total purchases).
+- For each customer, compute category_l1 and category_l1 share distribution: (purchases in category / total purchases).
 - Calculate concentration metrics: HHI, entropy, top-1 share, top-3 share.
 - Segment customers into concentration quartiles.
 
@@ -1682,7 +1697,10 @@ Do customers concentrate purchases in one or two categories, or do they buy broa
 #### Decision Rule
 - Keep if category affinity is strong and stable (>40% of customers have HHI > 0.3, indicating concentration) and correlates with customer characteristics (correlation with tenure or RFM > 0.3).
 
-### Idea 43: Brand Loyalty Within Preferred Categories
+### Idea 43
+
+> [!IMPORTANT]
+> Handles "Không xác định" in brand/manufacturer columns.: Brand Loyalty Within Preferred Categories
 
 #### Question
 Within their preferred categories, do customers stick to a few brands or explore many?
@@ -1724,7 +1742,7 @@ Which items get repeated purchases, and how does repeat likelihood vary by item 
 - `item_id`
 - `updated_date`
 - `quantity`
-- `category_l2`
+- `category_l1`
 - `lifecycle_stage` (derived)
 - `price_tier` (derived)
 
@@ -1768,7 +1786,7 @@ Do customers follow a progression through size buckets (e.g., buying larger size
 - `size`
 - `updated_date`
 - `quantity`
-- `category_l2`
+- `category_l1`
 
 #### Method
 - Filter to items with valid, non-null size values (exclude "Không xác định").
@@ -1795,7 +1813,10 @@ Do customers follow a progression through size buckets (e.g., buying larger size
 #### Decision Rule
 - Keep if size progression is directional (upgrade rate >40%, downgrade rate <10% for repeat customers) and predictable enough to guide size-aware recommendations.
 
-### Idea 46: Customer Segment Clustering (RFM-style)
+### Idea 46
+
+> [!IMPORTANT]
+> Handles "Không xác định" in brand/manufacturer columns.: Customer Segment Clustering (RFM-style)
 
 #### Question
 Can customers be clustered into meaningful purchasing behavior segments based on RFM and behavioral metrics?
@@ -1809,7 +1830,7 @@ Can customers be clustered into meaningful purchasing behavior segments based on
 - `updated_date`
 - `quantity`
 - `item_id`
-- `category_l2`
+- `category_l1`
 - `brand`
 
 #### Method
@@ -1894,7 +1915,7 @@ Do customers shift up or down price tiers over their lifetime, and does this cor
 - `customer_id`
 - `updated_date`
 - `price`
-- `category_l2`
+- `category_l1`
 - `quantity`
 
 #### Method
@@ -1971,7 +1992,7 @@ Do different customer segments buy different category combinations, and can this
 
 #### Columns to Inspect
 - `customer_id`
-- `category_l2`
+- `category_l1`
 - `updated_date`
 - `quantity`
 
