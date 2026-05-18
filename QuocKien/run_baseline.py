@@ -59,7 +59,7 @@ def main() -> None:
     items_path = args.data_root / "items.parquet"
     splits: SplitResult = load_splits(transaction_path, items_path, batch_size=args.batch_size)
 
-    if splits.train.empty:
+    if splits.train.is_empty():
         raise RuntimeError("No training interactions were found after splitting the transaction parquet.")
 
     print(

@@ -3,8 +3,8 @@ import numpy as np
 import os
 from scipy.sparse import csr_matrix
 
-T_PATH = '../transaction_full_2025.parquet'
-I_PATH = '../items.parquet'
+T_PATH = r'd:\CS116\ProjectNumberOne\transaction_full_2025.parquet'
+I_PATH = r'd:\CS116\ProjectNumberOne\items.parquet'
 
 def check_v7_recall():
     print("=== Analyzing Candidate Recall (V7 Prototyping) ===")

@@ -5,8 +5,8 @@ from scipy.sparse import csr_matrix
 from sklearn.decomposition import TruncatedSVD
 
 # Mock paths (standard for this workspace)
-T_PATH = '../transaction_full_2025.parquet'
-I_PATH = '../items.parquet'
+T_PATH = r'd:\CS116\ProjectNumberOne\transaction_full_2025.parquet'
+I_PATH = r'd:\CS116\ProjectNumberOne\items.parquet'
 
 def check_recall():
     print("=== Analyzing Candidate Recall (V6 Logic) ===")
