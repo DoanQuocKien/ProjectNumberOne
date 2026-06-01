@@ -3,3 +3,4 @@ polars
 pyarrow
 scipy
 scikit-learn
+lightgbm

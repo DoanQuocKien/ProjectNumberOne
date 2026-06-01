@@ -1,0 +1,44 @@
+======================================================================
+              PIR PIPELINE V6 vs V7 TECHNICAL COMPARISON
+======================================================================
+
+[1] CANDIDATE EXTRACTION PARAMETERS:
+V6 SVD Components: ['64']
+V6 SVD Candidates per User (argsorted): ['50']
+V6 I2I Candidates per User (argsorted): ['40']
+V7 SVD Components: ['128']
+V7 SVD Candidates per User (argsorted): ['30']
+V7 I2I Candidates per User (argsorted): []
+
+[2] V6 CANDIDATE EXTRACTION CODE SNIPPETS:
+def get_candidates(self, target_users, chunk_size=1000):
+        print("    [Retriever] Fetching Repurchases...")
+        df_rep = self.history_df.filter(pl.col('customer_id').is_in(pl.Series(target_users))).select(['customer_id', 'item_id']).unique()
+        c_i2i, c_svd, i_arr = [], [], np.array(self.items_list)
+        t_idx = [self.u2idx[u] for u in target_users if u in self.u2idx]
+        t_u = [u for u in target_users if u in self.u2idx]
+        for i in range(0, len(t_idx), chunk_size):
+            idx, u = t_idx[i:i+chunk_size], np.array(t_u[i:i+chunk_size])
+            s_i = self.matrix[idx].dot(self.i2i).toarray(); t40 = np.argsort(-s_i, axis=1)[:, :40]; m = np.take_along_axis(s_i, t40, axis=1) > 0
+            c_i2i.append(pl.DataFrame({'customer_id': np.repeat(u, 40)[m.flatten()], 'item_id': i_arr[t40.flatten()][m.flatten()]}, schema={'customer_id': pl.Int32, 'item_id': pl.Utf8}))
+            s_s = self.u_f[idx] @ self.i_f.T; t50 = np.argsort(-s_s, axis=1)[:, :50]
+            c_svd.append(pl.DataFrame({'customer_id': np.repeat(u, 50), 'item_id': i_arr[t50.flatten()]}, schema={'customer_id': pl.Int32, 'item_id': pl.Utf8}))
+            del s_i, s_s, m, t40, t50; gc.collect()
+        df_i2i, df_svd = pl.concat(c_i2i).unique() if c_i2i else pl.DataFrame(), pl.concat(c_svd).unique() if c_svd else pl.DataFrame()
+        df_cat = self.u_t_cat.filter(pl.col('customer_id').is_in(target_users)).join(self.cat_pop, on='cat_id').select(['customer_id', 'item_id'])
+        return {'rep': df_rep, 'i2i': df_i2i, 'svd': df_svd, 'cat': df_cat}
+
+    def filter_candidates(self, cands_dict, target_users):
+        all_cands = pl.concat([df for df in cands_dict.values() if df.height > 0]).unique()
+        hist_s = self.history_df.filter(pl.col('customer_id').is_in(pl.Series("customer_id", target_users)))
+        uh = hist_s.group_by('customer_id').agg(pl.col('location').mode().first().alias('loc'))
+        up = hist_s.group_by('customer_id').agg(pl.col('price').mean().alias('avg_p'))
+        del hist_s; gc.collect()
+        f = (all_cands.join(up, on='customer_id', how='left').join(self.item_prices, on='item_id', how='left').filter((pl.col('item_p') <= pl.col('avg_p') * 6) | (pl.col('avg_p') == 0)).select(['customer_id', 'item_id']))
+        item_loc_flat = self.item_locations.explode('item_hubs').rename({'item_hubs': 'loc'})
+        f = (f.join(uh, on='customer_id', how='left').join(item_loc_flat, on=['item_id', 'loc'], how='inner').select(['customer_id', 'item_id']))
+
+----------------------------------------
+
+
+[3] V7 CANDIDATE EXTRACTION CODE SNIPPETS:

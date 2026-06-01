@@ -1,0 +1,145 @@
+=================== V6 CLASS RETRIEVER / GET_CANDIDATES ===================
+--- Cell 4 ---
+class V5Retriever:
+    def __init__(self, history_df, items_df, item_locations, item_prices, target_users):
+        print("    [Retriever] Initializing Shielded Interactions...")
+        self.history_df, self.item_locations, self.item_prices = history_df, item_locations, item_prices
+        hist_sampled = history_df.filter(pl.col('customer_id').is_in(pl.Series("customer_id", target_users)))
+        ints = hist_sampled.group_by(['customer_id', 'item_id']).agg(pl.col('quantity').sum().alias('w'))
+        ints = ints.with_columns([pl.col('customer_id').rank('dense').cast(pl.Int32).alias('u_idx')-1, pl.col('item_id').rank('dense').cast(pl.Int32).alias('i_idx')-1])
+        u_map, i_map = ints.select(['customer_id', 'u_idx']).unique(), ints.select(['item_id', 'i_idx']).unique()
+        self.u2idx, self.items_list = dict(zip(u_map['customer_id'], u_map['u_idx'])), i_map.sort('i_idx')['item_id'].to_list()
+        print(f"    [Retriever] Building Sparse Matrix ({u_map.height} x {i_map.height})...")
+        self.matrix = csr_matrix((ints['w'].to_numpy(), (ints['u_idx'].to_numpy(), ints['i_idx'].to_numpy())), shape=(u_map.height, i_map.height), dtype=np.float32)
+        del ints, u_map, i_map; gc.collect()
+        print("    [Retriever] Computing I2I & SVD...")
+        bin_m = self.matrix.copy(); bin_m.data = np.ones_like(bin_m.data); self.i2i = bin_m.T.dot(bin_m).astype(np.float32); self.i2i.setdiag(0)
+        del bin_m; gc.collect()
+        svd = TruncatedSVD(n_components=64, random_state=42)
+        self.u_f, self.i_f = svd.fit_transform(self.matrix).astype(np.float32), svd.components_.T.astype(np.float32)
+        print("    [Retriever] Computing Category Profiles...")
+        items_cat = items_df.lazy().select(['item_id', 'category_l1_id']).rename({'category_l1_id': 'cat_id'})
+        self.cat_pop = (history_df.lazy().filter(pl.col('month') >= 9).select(['item_id', 'quantity']).join(items_cat, on='item_id', how='left').group_by(['cat_id', 'item_id']).agg(pl.col('quantity').sum().alias('w')).sort('w', descending=True).group_by('cat_id').head(30)).collect()
+        self.u_t_cat = (hist_sampled.lazy().select(['customer_id', 'item_id']).join(items_cat, on='item_id', how='left').group_by('customer_id').agg(pl.col('cat_id').mode().first().alias('cat_id'))).collect()
+        del hist_sampled; gc.collect()
+
+    def get_candidates(self, target_users, chunk_size=1000):
+        print("    [Retriever] Fetching Repurchases...")
+        df_rep = self.history_df.filter(pl.col('customer_id').is_in(pl.Series(target_users))).select(['customer_id', 'item_id']).unique()
+        c_i2i, c_svd, i_arr = [], [], np.array(self.items_list)
+        t_idx = [self.u2idx[u] for u in target_users if u in self.u2idx]
+        t_u = [u for u in target_users if u in self.u2idx]
+        for i in range(0, len(t_idx), chunk_size):
+            idx, u = t_idx[i:i+chunk_size], np.array(t_u[i:i+chunk_size])
+            s_i = self.matrix[idx].dot(self.i2i).toarray(); t40 = np.argsort(-s_i, axis=1)[:, :40]; m = np.take_along_axis(s_i, t40, axis=1) > 0
+            c_i2i.append(pl.DataFrame({'customer_id': np.repeat(u, 40)[m.flatten()], 'item_id': i_arr[t40.flatten()][m.flatten()]}, schema={'customer_id': pl.Int32, 'item_id': pl.Utf8}))
+            s_s = self.u_f[idx] @ self.i_f.T; t50 = np.argsort(-s_s, axis=1)[:, :50]
+            c_svd.append(pl.DataFrame({'customer_id': np.repeat(u, 50), 'item_id': i_arr[t50.flatten()]}, schema={'customer_id': pl.Int32, 'item_id': pl.Utf8}))
+            del s_i, s_s, m, t40, t50; gc.collect()
+        df_i2i, df_svd = pl.concat(c_i2i).unique() if c_i2i else pl.DataFrame(), pl.concat(c_svd).unique() if c_svd else pl.DataFrame()
+        df_cat = self.u_t_cat.filter(pl.col('customer_id').is_in(target_users)).join(self.cat_pop, on='cat_id').select(['customer_id', 'item_id'])
+        return {'rep': df_rep, 'i2i': df_i2i, 'svd': df_svd, 'cat': df_cat}
+
+    def filter_candidates(self, cands_dict, target_users):
+        all_cands = pl.concat([df for df in cands_dict.values() if df.height > 0]).unique()
+        hist_s = self.history_df.filter(pl.col('customer_id').is_in(pl.Series("customer_id", target_users)))
+        uh = hist_s.group_by('customer_id').agg(pl.col('location').mode().first().alias('loc'))
+        up = hist_s.group_by('customer_id').agg(pl.col('price').mean().alias('avg_p'))
+        del hist_s; gc.collect()
+        f = (all_cands.join(up, on='customer_id', how='left').join(self.item_prices, on='item_id', how='left').filter((pl.col('item_p') <= pl.col('avg_p') * 6) | (pl.col('avg_p') == 0)).select(['customer_id', 'item_id']))
+        item_loc_flat = self.item_locations.explode('item_hubs').rename({'item_hubs': 'loc'})
+        f = (f.join(uh, on='customer_id', how='left').join(item_loc_flat, on=['item_id', 'loc'], how='inner').select(['customer_id', 'item_id']))
+        del uh, item_loc_flat; gc.collect()
+        return f
+
+
+================================================================================
+
+=================== V7 CLASS RETRIEVER / GET_CANDIDATES ===================
+--- Cell 3 ---
+from scipy.sparse import csr_matrix
+print("=== V7 RETRIEVER: ENSEMBLE CANDIDATE GENERATION ===")
+class V7Retriever:
+    def __init__(self, history_df, items_df):
+        self.history_df = history_df
+        self.items_df = items_df
+        self.max_ts = history_df['event_ts'].max()
+        
+        # Pre-calculate item metadata using global context if available
+        self.item_locs = history_df.group_by('item_id').agg(pl.col('location').unique().alias('item_hubs'))
+        self.item_prcs = history_df.group_by('item_id').agg(pl.col('price').median().alias('item_p'))
+        self._build_indexes()
+        self._build_trends()
+
+    def _build_indexes(self):
+        print(" Building SVD & Cosine I2I...")
+        hist = self.history_df.group_by(['customer_id', 'item_id']).agg(pl.col('quantity').sum().alias('w'))
+        last_buy = self.history_df.group_by(['customer_id', 'item_id']).agg(pl.col('event_ts').max().alias('last_ts'))
+        hist = hist.join(last_buy, on=['customer_id', 'item_id'])
+        hist = hist.with_columns((pl.col('w') * (0.9 ** ((self.max_ts - pl.col('last_ts')).dt.total_days() / 30.0))).alias('w'))
+        
+        hist = hist.with_columns([pl.col('customer_id').rank('dense').cast(pl.Int64).alias('u_idx')-1, pl.col('item_id').rank('dense').cast(pl.Int32).alias('i_idx')-1])
+        self.u_map = hist.select(['customer_id', 'u_idx']).unique()
+        self.i_map = hist.select(['item_id', 'i_idx']).unique()
+        self.u2idx = dict(zip(self.u_map['customer_id'], self.u_map['u_idx']))
+        self.items_list = self.i_map.sort('i_idx')['item_id'].to_list()
+        
+        self.matrix = csr_matrix((hist['w'].to_numpy(), (hist['u_idx'].to_numpy(), hist['i_idx'].to_numpy())), shape=(self.u_map.height, self.i_map.height), dtype=np.float32)
+        
+        self.svd = TruncatedSVD(n_components=128, random_state=42)
+        self.u_vecs = self.svd.fit_transform(self.matrix)
+        self.i_vecs = self.svd.components_.T
+        
+        norm_m = normalize(self.matrix, norm='l2', axis=0)
+        self.i2i_cosine = norm_m.T.dot(norm_m).astype(np.float32)
+        self.i2i_cosine.setdiag(0)
+
+    def _build_trends(self):
+        vol_30d = self.history_df.filter(pl.col('event_ts') >= self.max_ts - pl.duration(days=30)).group_by('item_id').len()
+        self.global_trend = vol_30d.sort('len', descending=True).head(150).select('item_id')
+        self.local_trend = self.history_df.filter(pl.col('event_ts') >= self.max_ts - pl.duration(days=60)).group_by(['location', 'item_id']).len().sort(['location', 'len'], descending=[False, True]).group_by('location').head(80)
+        j_df = self.history_df.filter(pl.col('event_ts') >= self.max_ts - pl.duration(days=60)).join(self.items_df.select(['item_id', 'category_l1']), on='item_id')
+        self.cat_trend = j_df.group_by(['category_l1', 'item_id']).len().sort(['category_l1', 'len'], descending=[False, True]).group_by('category_l1').head(30)
+        j_df_b = self.history_df.filter(pl.col('event_ts') >= self.max_ts - pl.duration(days=90)).join(self.items_df.select(['item_id', 'brand']), on='item_id').filter(pl.col('brand') != 'Không xác định')
+        self.brand_trend = j_df_b.group_by(['brand', 'item_id']).len().sort(['brand', 'len'], descending=[False, True]).group_by('brand').head(10)
+
+    def get_candidates(self, target_users):
+        hist_s = self.history_df.filter(pl.col('customer_id').is_in(target_users))
+        cands = {}
+        cands['rep'] = hist_s.select(['customer_id', 'item_id']).unique()
+        cands['global'] = pl.DataFrame({'customer_id': target_users}).join(self.global_trend.with_columns(pl.lit(1).alias('_k')), how='cross').drop('_k')
+        user_loc = hist_s.group_by('customer_id').agg(pl.col('location').mode().first().alias('location'))
+        cands['local'] = user_loc.join(self.local_trend, on='location').select(['customer_id', 'item_id']).unique()
+        user_cats = hist_s.join(self.items_df.select(['item_id', 'category_l1']), on='item_id').group_by(['customer_id', 'category_l1']).len().sort(['customer_id', 'len'], descending=[False, True]).group_by('customer_id').head(3)
+        cands['cat'] = user_cats.join(self.cat_trend, on='category_l1').select(['customer_id', 'item_id']).unique()
+        user_brands = hist_s.join(self.items_df.select(['item_id', 'brand']), on='item_id').filter(pl.col('brand') != 'Không xác định').group_by(['customer_id', 'brand']).len().sort(['customer_id', 'len'], descending=[False, True]).group_by('customer_id').head(3)
+        cands['brand'] = user_brands.join(self.brand_trend, on='brand').select(['customer_id', 'item_id']).unique()
+        
+        t_idx = [self.u2idx[u] for u in target_users if u in self.u2idx]
+        t_u = [u for u in target_users if u in self.u2idx]
+        i_arr = np.array(self.items_list)
+        chunk = 2000
+        c_i2i, c_svd = [], []
+        for i in range(0, len(t_idx), chunk):
+            idx = t_idx[i:i+chunk]
+            u_b = np.array(t_u[i:i+chunk])
+            s_s = self.u_vecs[idx].dot(self.i_vecs.T)
+            t30 = np.argsort(-s_s, axis=1)[:, :30]
+            c_svd.append(pl.DataFrame({'customer_id': pl.Series(np.repeat(u_b, 30), dtype=pl.Int64), 'item_id': i_arr[t30.flatten()]}))
+            s_i = self.matrix[idx].dot(self.i2i_cosine).toarray()
+            t40 = np.argsort(-s_i, axis=1)[:, :40]
+            m = np.take_along_axis(s_i, t40, axis=1) > 0
+            c_i2i.append(pl.DataFrame({'customer_id': pl.Series(np.repeat(u_b, 40)[m.flatten()], dtype=pl.Int64), 'item_id': i_arr[t40.flatten()][m.flatten()]}))
+        cands['svd'] = pl.concat(c_svd).unique() if c_svd else pl.DataFrame(schema={'customer_id': pl.Int64, 'item_id': pl.Utf8})
+        cands['i2i'] = pl.concat(c_i2i).unique() if c_i2i else pl.DataFrame(schema={'customer_id': pl.Int64, 'item_id': pl.Utf8})
+        
+        all_cands = pl.concat([df for df in cands.values() if df.height > 0]).unique()
+        uh = hist_s.group_by('customer_id').agg(pl.col('location').mode().first().alias('loc'))
+        up = hist_s.group_by('customer_id').agg(pl.col('price').mean().alias('avg_p'))
+        f = (all_cands.join(up, on='customer_id', how='left').join(self.item_prcs, on='item_id', how='left').filter((pl.col('item_p') <= pl.col('avg_p') * 6) | (pl.col('avg_p').is_null())).select(['customer_id', 'item_id']))
+        item_loc_flat = self.item_locs.explode('item_hubs').rename({'item_hubs': 'loc'})
+        f = (f.join(uh, on='customer_id', how='left').join(item_loc_flat, on=['item_id', 'loc'], how='inner').select(['customer_id', 'item_id']))
+        return f
+
+
+================================================================================
