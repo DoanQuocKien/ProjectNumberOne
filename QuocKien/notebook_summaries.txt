@@ -1,0 +1,54 @@
+--- d:/CS116/ProjectNumberOne/QuocKien/Refresh\01A_Candidates_CPU.ipynb ---
+# Attempt A - Candidate Generation (CPU)\nGenerates max 106 candidates per user.
+
+CODE START: import os
+
+
+--- d:/CS116/ProjectNumberOne/QuocKien/Refresh\01C_Candidates_CPU.ipynb ---
+# Attempt C - Candidate Generation (CPU)\nGenerates max 230 candidates per user.
+
+CODE START: import os
+
+
+--- d:/CS116/ProjectNumberOne/QuocKien/Refresh\01_Train_GPU.ipynb ---
+CODE START: 
+CODE START: import gc, pickle, re
+CODE START: 
+CODE START: 
+CODE START: 
+
+
+--- d:/CS116/ProjectNumberOne/QuocKien/Refresh\02A_Train_GPU.ipynb ---
+CODE START: 
+CODE START: import gc, pickle, re
+CODE START: 
+CODE START: 
+
+
+--- d:/CS116/ProjectNumberOne/QuocKien/Refresh\02C_Train_GPU.ipynb ---
+CODE START: 
+CODE START: import gc, pickle, re
+CODE START: 
+CODE START: 
+
+
+--- d:/CS116/ProjectNumberOne/QuocKien/Refresh\02_Inference_CPU.ipynb ---
+CODE START: 
+CODE START: import gc, pickle, re
+CODE START: 
+CODE START: 
+CODE START: 
+
+
+--- d:/CS116/ProjectNumberOne/QuocKien/Refresh\03A_Inference_CPU.ipynb ---
+CODE START: 
+CODE START: import gc, pickle, re
+CODE START: 
+
+
+--- d:/CS116/ProjectNumberOne/QuocKien/Refresh\03C_Inference_CPU.ipynb ---
+CODE START: 
+CODE START: import gc, pickle, re
+CODE START: 
+
+
